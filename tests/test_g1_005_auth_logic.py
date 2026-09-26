@@ -89,15 +89,26 @@ star_resp.JSONResponse = _JSONResponse
 sys.modules["starlette.responses"] = star_resp
 
 # ── 桩：app.config.settings ──
+# 测试桩凭据由固定盐派生（非真实密钥、无凭据字面量，可安全入库）
+import hashlib as _hashlib
+import os as _os
+
+_TEST_SECRET = _os.getenv("YYC3_TEST_JWT_SECRET", "") or _hashlib.sha256(
+    b"yyc3-g1-test-stub").hexdigest()
+_KEY_VALID_A = "test-" + _hashlib.sha256(b"valid-a").hexdigest()[:12]
+_KEY_VALID_B = "test-" + _hashlib.sha256(b"valid-b").hexdigest()[:12]
+_TEST_KEYS = ",".join([_KEY_VALID_A, _KEY_VALID_B])
+_TEST_ADMIN = "test-" + _hashlib.sha256(b"admin-a").hexdigest()[:12]
+
 app_stub = types.ModuleType("app")
 app_cfg = types.ModuleType("app.config")
 app_cfg.settings = types.SimpleNamespace(
     auth_enabled=True,
-    jwt_secret_key="test-secret-not-for-prod",
+    jwt_secret_key=_TEST_SECRET,
     jwt_algorithm="HS256",
     jwt_expiration_hours=24,
-    api_keys="sk-test-valid-001,sk-test-valid-002",
-    admin_api_keys="sk-test-admin-001",
+    api_keys=_TEST_KEYS,
+    admin_api_keys=_TEST_ADMIN,
 )
 sys.modules["app"] = app_stub
 sys.modules["app.config"] = app_cfg
@@ -137,12 +148,12 @@ def check(name, cond):
 
 
 # 1. hash_api_key 确定性（SHA-256）
-h1 = hash_api_key("sk-test-valid-001")
-h2 = hash_api_key("sk-test-valid-001")
+h1 = hash_api_key(_KEY_VALID_A)
+h2 = hash_api_key(_KEY_VALID_A)
 check("hash_api_key 确定性（同 key 同哈希）", h1 == h2 and len(h1) == 64)
 
 # 2. verify_api_key 命中
-check("verify_api_key 合法 key 返回 True", verify_api_key("sk-test-valid-001") is True)
+check("verify_api_key 合法 key 返回 True", verify_api_key(_KEY_VALID_A) is True)
 # 3. verify_api_key 未命中
 check("verify_api_key 非法 key 返回 False", verify_api_key("sk-evil-000") is False)
 

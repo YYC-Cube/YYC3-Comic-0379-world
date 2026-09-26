@@ -208,11 +208,11 @@ class ModelRouter:
             )
             weights[nid] = max(weight, 0.001)  # 最小权重防止除零
 
-        # 加权随机选择（避免单节点过载）
+        # 加权随机选择（避免单节点过载；SystemRandom 满足安全随机要求）
         total = sum(weights.values())
         import random
 
-        r = random.uniform(0, total)
+        r = random.SystemRandom().uniform(0, total)
         cumulative = 0.0
         for nid, w in weights.items():
             cumulative += w
@@ -322,7 +322,7 @@ class ModelRouter:
     def _select_by_random(self, nodes: List[str]) -> str:
         import random
 
-        return random.choice(nodes)
+        return random.SystemRandom().choice(nodes)
 
     # ── 健康检查 ──────────────────────────────────────────
 

@@ -214,7 +214,7 @@ class UpstreamRegistry:
                 * penalty,
             )
         total = sum(weights.values())
-        r = random.uniform(0, total)
+        r = random.SystemRandom().uniform(0, total)
         cumulative = 0.0
         for u in avail:
             cumulative += weights[u.name]

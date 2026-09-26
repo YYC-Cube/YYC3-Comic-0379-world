@@ -5,6 +5,7 @@ YYC³ 模型服务管理器
 """
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -12,6 +13,9 @@ from pathlib import Path
 from typing import Optional
 
 import psutil
+
+# 模型名白名单：字母/数字开头，仅允许字母数字._-，禁止路径分隔符与 ..
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class ModelServiceManager:
@@ -44,14 +48,13 @@ class ModelServiceManager:
             self.pids = {}
 
     def save_status(self):
-        """保存状态文件"""
+        """保存状态文件（固定路径白名单内写入）"""
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(self.status_file, "w") as f:
-            json.dump(self.services, f, indent=2, ensure_ascii=False)
-
-        with open(self.pid_file, "w") as f:
-            json.dump(self.pids, f, indent=2, ensure_ascii=False)
+        self.status_file.write_text(
+            json.dumps(self.services, indent=2, ensure_ascii=False), encoding="utf-8")
+        self.pid_file.write_text(
+            json.dumps(self.pids, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def check_process(self, pid: int) -> bool:
         """检查进程是否存在"""
@@ -68,7 +71,15 @@ class ModelServiceManager:
             model_name: 模型名称
             port: 服务端口
         """
-        model_path = self.model_dir / model_name
+        # 路径穿越防护：模型名白名单校验 + 解析后必须仍落在模型根目录内
+        if not _MODEL_NAME_RE.match(model_name or ""):
+            print(f"❌ 非法模型名（仅允许字母数字._-，禁止路径分隔符）: {model_name}")
+            return False
+        model_root = self.model_dir.resolve()
+        model_path = (self.model_dir / model_name).resolve()
+        if not str(model_path).startswith(str(model_root)):
+            print(f"❌ 模型路径越界: {model_path}")
+            return False
 
         if not model_path.exists():
             print(f"❌ 模型不存在: {model_name}")
@@ -187,10 +198,12 @@ while True:
         print(f"错误: {{e}}")
 """
 
-        # 保存脚本
-        script_file = self.model_dir / f".start_{model_name}.py"
-        with open(script_file, "w") as f:
-            f.write(script)
+        # 保存脚本（model_name 已通过白名单校验，仍做包含性校验双保险）
+        script_file = (self.model_dir / f".start_{model_name}.py").resolve()
+        if not str(script_file).startswith(str(model_root)):
+            print(f"❌ 启动脚本路径越界: {script_file}")
+            return False
+        script_file.write_text(script, encoding="utf-8")
 
         # 启动进程
         try:
