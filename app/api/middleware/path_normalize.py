@@ -1,10 +1,11 @@
 """
 @file: app/middleware/path_normalize.py
 @description: 跨节点路径归一化中间件 — 将 Mac 风格路径（/Volumes/nas/...）归一为标准 /mnt/nas/...
-@version: v1.0.0
+@version: v1.0.1
 @status: active
 @align: G1-TC-G1-004 路径归一中间件
 @redline: 全节点强制 /mnt/nas/ 标准路径，杜绝跨节点路径断点
+@changelog: v1.0.1 is_nas_path 前缀边界修复（OBS-G1-004-1：/mnt/nasdir 误判）
 """
 
 import logging
@@ -73,10 +74,13 @@ def normalize_nas_path(raw_path: Optional[str]) -> str:
 
 
 def is_nas_path(path: Optional[str]) -> bool:
-    """判定是否为 NAS 标准路径（归一后以 /mnt/nas 开头）"""
+    """判定是否为 NAS 标准路径（归一后为 /mnt/nas 本身或其子路径）"""
     if not path:
         return False
-    return normalize_nas_path(path).startswith(NAS_STANDARD_ROOT)
+    normalized = normalize_nas_path(path)
+    # 边界对齐 normalize_nas_path 口径：根本身算 NAS 路径；
+    # /mnt/nasdir 等共享前缀但非子路径的目录不算（OBS-G1-004-1 修复）
+    return normalized == NAS_STANDARD_ROOT or normalized.startswith(NAS_STANDARD_ROOT + "/")
 
 
 __all__ = ["normalize_nas_path", "is_nas_path", "NAS_STANDARD_ROOT", "MAC_NAS_ALIASES"]
