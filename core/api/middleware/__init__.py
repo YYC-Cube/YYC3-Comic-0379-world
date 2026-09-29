@@ -12,6 +12,12 @@
 """
 
 from .auth import AuthConfig, AuthMiddleware, auth_required
+from .path_normalize import (
+    NAS_STANDARD_ROOT,
+    PathNormalizeMiddleware,
+    is_nas_path,
+    normalize_nas_path,
+)
 from .rate_limit import RateLimitMiddleware, rate_limit
 from .versioning import VersioningMiddleware
 
@@ -22,4 +28,8 @@ __all__ = [
     "AuthConfig",
     "auth_required",
     "VersioningMiddleware",
+    "PathNormalizeMiddleware",
+    "normalize_nas_path",
+    "is_nas_path",
+    "NAS_STANDARD_ROOT",
 ]

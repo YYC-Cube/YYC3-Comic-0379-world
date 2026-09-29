@@ -50,7 +50,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.errors.handler import error_handler
-from app.middleware import AuthMiddleware, RateLimitMiddleware, VersioningMiddleware
+from app.middleware import (
+    AuthMiddleware,
+    PathNormalizeMiddleware,
+    RateLimitMiddleware,
+    VersioningMiddleware,
+)
 from app.models import ErrorRecord, ModelConfig, ModelStat, PingResponse, UsageSummary
 
 app = FastAPI(
@@ -227,6 +232,8 @@ app.add_middleware(
 app.add_middleware(AuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(VersioningMiddleware)
+# TC-G1-004 接线：最后注册 = 最外层，先于鉴权/限流完成请求体路径归一
+app.add_middleware(PathNormalizeMiddleware)
 
 START_TIME = time.time()
 
