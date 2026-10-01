@@ -21,6 +21,7 @@
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -58,7 +59,33 @@ from app.middleware import (
 )
 from app.models import ErrorRecord, ModelConfig, ModelStat, PingResponse, UsageSummary
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """应用生命周期（替代已弃用的 on_event，FastAPI lifespan 口径）
+
+    启动序与原 on_event("startup") 注册序一致；关停序与原反注册序（后启先停）一致。
+    生命周期函数定义于模块后段，运行期解析（lifespan 在服务启动时才执行）。
+    """
+    # ── 启动序（原注册序）──
+    await validate_critical_config()
+    await load_task_prices_from_db()
+    await start_probe_loop()
+    await start_agent_worker()
+    await start_a2a_registry()
+    await start_a2a_result_consumer()
+    await start_a2a_audit_shipper()
+    yield
+    # ── 关停序（原反注册序：后启先停）──
+    await stop_a2a_audit_shipper()
+    await stop_a2a_result_consumer()
+    await stop_a2a_registry()
+    await stop_agent_worker()
+    await stop_probe_loop()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="YYC³ 统一模型网关",
     description="""
 ## 🎯 核心功能
@@ -168,7 +195,6 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
-@app.on_event("startup")
 async def validate_critical_config():
     """启动时校验关键配置，防止生产环境使用默认值"""
     logger = logging.getLogger(__name__)
@@ -900,7 +926,6 @@ async def admin_pricing_task_type_upsert(task_type: str, req: TaskPriceRequest):
     }
 
 
-@app.on_event("startup")
 async def load_task_prices_from_db():
     """协同事务价格表启动加载：PG task_prices 覆盖内存默认（best-effort 不阻断）"""
     from app.services import pricing as pricing_svc
@@ -908,7 +933,6 @@ async def load_task_prices_from_db():
     await pricing_svc.load_task_prices_from_db()
 
 
-@app.on_event("startup")
 async def start_probe_loop():
     global _probe_task
     if settings.probe_enabled and settings.router_enabled:
@@ -923,7 +947,6 @@ async def start_probe_loop():
     await vk_manager.start_ledger()
 
 
-@app.on_event("shutdown")
 async def stop_probe_loop():
     global _probe_task
     if _probe_task is not None:
@@ -934,7 +957,6 @@ async def stop_probe_loop():
     await vk_manager.stop_ledger()
 
 
-@app.on_event("startup")
 async def start_agent_worker():
     """AI Family 内置编排 Worker（AGENT_WORKER_ENABLED=false 或外置 Worker 部署时可关闭）"""
     from app.api import agent as agent_module
@@ -942,14 +964,12 @@ async def start_agent_worker():
     agent_module.start_worker()
 
 
-@app.on_event("shutdown")
 async def stop_agent_worker():
     from app.api import agent as agent_module
 
     await agent_module.stop_worker()
 
 
-@app.on_event("startup")
 async def start_a2a_registry():
     """A2A 启动：审计 sink 注入智云守护 + 内置编队 Agent Card 注册/心跳（A2A_ENABLED 控制）"""
     from app.services import a2a_protocol
@@ -957,14 +977,12 @@ async def start_a2a_registry():
     a2a_protocol.start_registry()
 
 
-@app.on_event("shutdown")
 async def stop_a2a_registry():
     from app.services import a2a_protocol
 
     await a2a_protocol.stop_registry()
 
 
-@app.on_event("startup")
 async def start_a2a_result_consumer():
     """A2A 结果流消费端：编排器聚合回执 + XAUTOCLAIM 挂起回收
     （A2A_ENABLED × A2A_RESULT_CONSUMER_ENABLED 双控；独立编排器部署时可在网关侧关闭）"""
@@ -973,14 +991,12 @@ async def start_a2a_result_consumer():
     a2a_result.start_result_consumer()
 
 
-@app.on_event("shutdown")
 async def stop_a2a_result_consumer():
     from app.services import a2a_result
 
     await a2a_result.stop_result_consumer()
 
 
-@app.on_event("startup")
 async def start_a2a_audit_shipper():
     """A2A 审计流 Loki 消费端：孤儿/死信审计可检索可告警
     （A2A_ENABLED × A2A_AUDIT_LOKI_ENABLED 双控，缺省关闭）"""
@@ -989,7 +1005,6 @@ async def start_a2a_audit_shipper():
     a2a_audit.start_audit_shipper()
 
 
-@app.on_event("shutdown")
 async def stop_a2a_audit_shipper():
     from app.services import a2a_audit
 
