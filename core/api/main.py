@@ -77,11 +77,22 @@ async def lifespan(_app: FastAPI):
     await start_a2a_audit_shipper()
     yield
     # ── 关停序（原反注册序：后启先停）──
-    await stop_a2a_audit_shipper()
-    await stop_a2a_result_consumer()
-    await stop_a2a_registry()
-    await stop_agent_worker()
-    await stop_probe_loop()
+    # best-effort 吞后台任务死亡异常：如 Redis 凭据不符时 stop_a2a_result_consumer
+    # 会因 hub 任务 run_forever 重试失败上抛 AuthenticationError，关停不应被阻断
+    # （CancelledError 属正常取消语义，仍向上传播）
+    for _name, _stop in (
+        ("a2a_audit_shipper", stop_a2a_audit_shipper),
+        ("a2a_result_consumer", stop_a2a_result_consumer),
+        ("a2a_registry", stop_a2a_registry),
+        ("agent_worker", stop_agent_worker),
+        ("probe_ledger", stop_probe_loop),
+    ):
+        try:
+            await _stop()
+        except asyncio.CancelledError:
+            raise
+        except Exception as _exc:  # noqa: BLE001  关停兜底：记录后继续后续关停步骤
+            logger.warning(f"关停 {_name} 异常（best-effort 忽略）: {_exc}")
 
 
 app = FastAPI(
