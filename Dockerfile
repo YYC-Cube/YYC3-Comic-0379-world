@@ -4,7 +4,9 @@
 # ============================================
 # 阶段 1: 基础镜像
 # ============================================
-FROM python:3.11-slim AS base
+# 2026-10-05 对齐：requirements.txt 锁定基线为 .venv Python 3.14.5（此前 3.11 与
+# 本地 3.14 双版本漂移，freeze 产物在 3.11 下存在 wheel 不可得风险）
+FROM python:3.14-slim AS base
 
 # 元数据
 LABEL maintainer="YanYuCloudCube Team <admin@0379.email>"
@@ -69,8 +71,10 @@ USER appuser
 EXPOSE 8000
 
 # 健康检查
+# 2026-10-05 修复：改用 stdlib urllib（原 `import requests` 但 requests 不在依赖清单，
+# 照旧构建容器会被误判 unhealthy）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/v1/ping')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/ping', timeout=8)" || exit 1
 
 # 启动命令（uvicorn 多 worker + 优雅关闭，与生产容器一致）
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-level", "info"]
