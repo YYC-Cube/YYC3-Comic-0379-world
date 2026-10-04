@@ -16,6 +16,7 @@ Phase 0 工程化改造（相对 docs 原型 ai_family_orchestrator.py）：
 - Phase 1 待办：LLM 通道接入网关 upstream_registry；asyncio 包装与 /v1/agent/tasks 异步端点
 """
 
+import json
 import logging
 
 from .base_agent import BaseAgent  # noqa: F401  （re-export 供包外调用方统一入口）
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 class AIFamilyOrchestrator:
     """AI Family 全链路协同编排引擎 v2.1（同步版）。"""
+
+    MAX_QC_ROUNDS = 2  # 质检二次优化最大轮次（F3，防死循环，超过即放行并标记）
 
     def __init__(self, retriever: Retriever | None = None):
         # ===== 第一层：决策中枢 =====
@@ -189,22 +192,28 @@ class AIFamilyOrchestrator:
         if "yuanqi_summary" not in outputs and "polished_report" in outputs:
             outputs["yuanqi_summary"] = self.yuanqi.synthesize(user_input, outputs)
 
-        # ========== Step7：格物·宗师 质量校验与事实核查 ==========
+        # ========== Step7：格物·宗师 质量校验与事实核查（F3 闭环复检 ≤2 轮） ==========
         core_content = (
             outputs.get("polished_report")
             or outputs.get("yuanqi_summary")
-            or outputs.get("yushu_analysis", "")
+            or outputs.get("yushu_analysis")
+            or outputs.get("creative_ideas", "")
         )
+        if not isinstance(core_content, str):
+            # G2-006 防御（2026-09-27 首跑发现，2026-10-05 自 components 回合生产分支）：
+            # 场景D 的 creative_ideas 为结构化列表（JSON 数组契约），质检/审计要求 str
+            # ——统一次序化后再进入 Step7/8
+            core_content = json.dumps(core_content, ensure_ascii=False)
         quality_result = self.gewu.validate(core_content, knowledge)
-        step_record = {"step": "quality_check", "result": quality_result}
-        result["steps"].append(step_record)
-        _fire("step", step_record)
-
-        # 质量不达标 → 创想·灵韵执行二次优化
-        if not quality_result["passed"]:
+        qc_rounds = 1
+        # F3：不达标 → 创想·灵韵二次优化 → 复检，直至达标或达轮次上限
+        # （此前生产为单次优化后直接放行，与 G2 验收语义不一致）
+        while not quality_result["passed"] and qc_rounds < self.MAX_QC_ROUNDS:
             logger.info(
-                "[Step7.1] 质量不达标（score=%s），执行二次优化...",
+                "[Step7.%d] 质量不达标（score=%s），执行二次优化（第%d轮）...",
+                qc_rounds + 1,
                 quality_result.get("score"),
+                qc_rounds + 1,
             )
             optimize_prompt = (
                 f"请根据以下建议修正内容：\n{quality_result['suggestions']}"
@@ -213,7 +222,16 @@ class AIFamilyOrchestrator:
             core_content = self.chuangxiang.polish_report(
                 optimize_prompt, knowledge_context=knowledge
             )
-            outputs["optimized_content"] = core_content
+            quality_result = self.gewu.validate(core_content, knowledge)
+            qc_rounds += 1
+        outputs["optimized_content"] = core_content
+        step_record = {
+            "step": "quality_check",
+            "result": quality_result,
+            "qc_rounds": qc_rounds,
+        }
+        result["steps"].append(step_record)
+        _fire("step", step_record)
 
         # ========== Step8：智云·守护 输出审计与脱敏 ==========
         audit_result = self.zhiyun.audit(core_content)

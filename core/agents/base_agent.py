@@ -80,6 +80,9 @@ class BaseAgent:
                     {"role": "user", "content": user_content},
                 ],
                 "temperature": float(os.getenv("LLM_TEMPERATURE", "0.3")),
+                # 思考模式长生成防线（M2 收口实测补充，2026-10-05 自 components 回合：
+                # Phase 0 httpx 重写时静默丢失，防思考型模型无限长生成拉高时延/成本）
+                "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "512")),
             }
             headers = {"Authorization": f"Bearer {os.getenv('LLM_API_KEY', 'nim-local-dummy')}"}
             timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
