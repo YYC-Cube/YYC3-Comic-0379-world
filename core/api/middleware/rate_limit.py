@@ -31,6 +31,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from app.cache import redis_client
 
@@ -196,35 +197,44 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.logger = logging.getLogger(__name__)
 
     async def dispatch(self, request: Request, call_next):
-        """中间件处理"""
+        """中间件处理
+
+        2026-10-05 修复（P1-3）：BaseHTTPMiddleware.dispatch 内 raise HTTPException
+        不会被内层 ExceptionMiddleware 转换——客户端实际收到 500 而非 429。
+        改为直接返回 JSONResponse（携带 Retry-After 头，语义完整）。
+        """
         client_ip = self._get_client_ip(request)
         user_id = request.headers.get("X-User-ID")
 
         allowed, ip_info = await self.ip_limiter.is_allowed(client_ip)
 
         if not allowed:
+            retry_after = max(0, ip_info["reset"] - int(time.time()))
             self.logger.warning(f"Rate limit exceeded for IP: {client_ip}")
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
+                content={
                     "error": "RATE_LIMIT_EXCEEDED",
                     "message": "Too many requests from this IP",
-                    "retry_after": ip_info["reset"] - int(time.time()),
+                    "retry_after": retry_after,
                 },
+                headers={"Retry-After": str(retry_after)},
             )
 
         if user_id:
             allowed, user_info = await self.user_limiter.is_allowed(user_id)
 
             if not allowed:
+                retry_after = max(0, user_info["reset"] - int(time.time()))
                 self.logger.warning(f"Rate limit exceeded for user: {user_id}")
-                raise HTTPException(
+                return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={
+                    content={
                         "error": "RATE_LIMIT_EXCEEDED",
                         "message": "Too many requests for this user",
-                        "retry_after": user_info["reset"] - int(time.time()),
+                        "retry_after": retry_after,
                     },
+                    headers={"Retry-After": str(retry_after)},
                 )
 
         response = await call_next(request)
