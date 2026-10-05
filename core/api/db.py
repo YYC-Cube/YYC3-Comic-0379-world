@@ -21,7 +21,7 @@
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
@@ -63,7 +63,7 @@ class ModelRegistry(Base):
     backend_type: Mapped[str] = mapped_column(String, nullable=False)
     backend_name: Mapped[str] = mapped_column(String, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
 class UsageLog(Base):
@@ -76,7 +76,7 @@ class UsageLog(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_usage_log_model", "model"),
@@ -101,9 +101,9 @@ class KnowledgeBase(Base):
     document_count: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     storage_size: Mapped[int] = mapped_column(BigInteger, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(255))
     extra_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
@@ -132,9 +132,9 @@ class Document(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
     extra_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
 
@@ -159,7 +159,7 @@ class DocumentChunk(Base):
     embedding: Mapped[Optional[list]] = mapped_column(Vector(1536))
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     extra_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
     document = relationship("Document", back_populates="chunks")
 
@@ -177,9 +177,9 @@ class QAPair(Base):
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     question_embedding: Mapped[Optional[list]] = mapped_column(Vector(1536))
     extra_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
 
 
@@ -198,7 +198,7 @@ class SearchHistory(Base):
     response_time_ms: Mapped[Optional[int]] = mapped_column(Integer)
     model_used: Mapped[Optional[str]] = mapped_column(String(100))
     user_id: Mapped[Optional[str]] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
 async def init_db():

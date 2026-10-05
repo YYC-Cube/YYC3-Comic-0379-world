@@ -51,8 +51,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _cache_key(req: CompletionRequest) -> str:
-    payload = json.dumps(req.dict(), sort_keys=True).encode()
+def _cache_key(req: CompletionRequest, identity: str = "anon") -> str:
+    """缓存 key = 请求体 + 调用方身份（哈希）。
+
+    P2 修复（2026-10-05 首审）：原 key 仅哈希请求体——同 prompt 跨用户命中，
+    构成隐私串扰/缓存投毒面。现绑定 vk 身份（匿名档隔离为 "anon"）；
+    身份经 sha256 入 key，不落明文。
+    """
+    payload = json.dumps({"req": req.dict(), "id": identity}, sort_keys=True).encode()
     return "llm_cache:" + hashlib.sha256(payload).hexdigest()
 
 
@@ -407,9 +413,14 @@ def _record_spend(vk, response: dict, model: str, upstream_name: str, latency_ms
 
 
 async def _handle_sync(req, backend, backend_name, backend_type, start_time, vk=None):
-    """处理同步请求（带缓存）"""
+    """处理同步请求（带缓存；缓存 key 绑定调用方身份，P2 隐私串扰修复）"""
     try:
-        cache_key = _cache_key(req)
+        # 身份判别：vk 存在时按其稳定字段哈希入 key；匿名档统一 "anon"
+        identity = "anon"
+        if vk:
+            _vid = vk.get("key") or vk.get("id") or vk.get("name")
+            identity = f"vk:{_vid}" if _vid else "vk:unknown"
+        cache_key = _cache_key(req, identity)
         cached = await cache_manager.get(cache_key)
         if cached:
             metrics_manager.record_cache_hit(req.model)
