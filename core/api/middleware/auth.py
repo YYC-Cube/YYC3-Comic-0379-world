@@ -50,22 +50,37 @@ class AuthConfig:
     API_KEY_HEADER: str = "X-API-Key"
     AUTHORIZATION_HEADER: str = "Authorization"
 
-    SKIP_AUTH_PATHS: Set[str] = {
+    # 基础免鉴权路径（探活面）；/metrics 与 /docs 族默认豁免保持历史行为，
+    # 可经 AUTH_PROTECT_METRICS / AUTH_PROTECT_DOCS 环境变量收紧（首审 P2 治理
+    # 2026-10-05：公网暴露前应置 true——指标与 API 面不应对外可见；默认 False 零变更）
+    _BASE_SKIP_PATHS: Set[str] = {
         "/v1/ping",
         "/v1/health",
         "/health",
         "/healthz",
-        "/metrics",
-        "/docs",
-        "/openapi.json",
-        "/redoc",
     }
+    _METRICS_SKIP_PATHS: Set[str] = {"/metrics"}
+    _DOCS_SKIP_PATHS: Set[str] = {"/docs", "/openapi.json", "/redoc"}
 
-    SKIP_AUTH_PREFIXES: List[str] = [
-        "/docs",
-        "/openapi",
-        "/redoc",
-    ]
+    @property
+    def SKIP_AUTH_PATHS(self) -> Set[str]:
+        paths = set(self._BASE_SKIP_PATHS)
+        if not self._protect("metrics"):
+            paths |= self._METRICS_SKIP_PATHS
+        if not self._protect("docs"):
+            paths |= self._DOCS_SKIP_PATHS
+        return paths
+
+    @staticmethod
+    def _protect(kind: str) -> bool:
+        """读取 AUTH_PROTECT_<KIND> 开关（默认 False 历史口径零变更）。"""
+        import os
+        return os.getenv(f"AUTH_PROTECT_{kind.upper()}", "").strip().lower() in (
+            "1", "true", "yes", "on")
+
+    @property
+    def SKIP_AUTH_PREFIXES(self) -> List[str]:
+        return [] if self._protect("docs") else ["/docs", "/openapi", "/redoc"]
 
     @property
     def VALID_API_KEYS(self) -> Set[str]:

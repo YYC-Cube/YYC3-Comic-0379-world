@@ -38,6 +38,7 @@ def _upstream_snapshot() -> dict:
 
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 router = APIRouter()
 
@@ -49,8 +50,9 @@ class ConnectionManager:
         self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
-        """接受新连接"""
-        await websocket.accept()
+        """接受新连接（幂等：首消息鉴权模式已 accept 时不重复）"""
+        if websocket.application_state != WebSocketState.CONNECTED:
+            await websocket.accept()
         self.active_connections.append(websocket)
         logger.info(f"WebSocket连接建立，当前连接数: {len(self.active_connections)}")
 
@@ -78,13 +80,58 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def _ws_authenticate(websocket: WebSocket, token: Optional[str]) -> bool:
+    """WS 鉴权双通道（首审 P2 治理 2026-10-05）。
+
+    - query token（历史方式）：继续兼容，但密钥会进入代理/访问日志——
+      记 warning 提示迁移，后续版本移除；
+    - 首消息鉴权（推荐）：连接后首条 {"type":"auth","token":...} JSON，
+      通过后进入业务循环；失败关闭（4001/4003）。
+    :return: True=已通过（首消息模式已完成 accept），False=已 close 拒绝
+    """
+    import json as _json
+
+    if token:
+        logger.warning(
+            "[ws] token 经 URL query 传递（会进代理/访问日志，P2 风险）——"
+            "建议迁移首消息鉴权：连接后发送 {\"type\":\"auth\",\"token\":...}")
+        try:
+            if verify_api_key(token):
+                return True
+            await websocket.close(code=4003, reason="Invalid API key")
+        except Exception as e:
+            logger.error(f"WebSocket认证失败: {e}")
+            await websocket.close(code=4003, reason="Authentication failed")
+        return False
+
+    # 首消息鉴权：先 accept 再等 auth 帧（否则无法回读消息）
+    await websocket.accept()
+    try:
+        raw = await websocket.receive_text()
+        frame = _json.loads(raw)
+        tok = frame.get("token") if frame.get("type") == "auth" else None
+        if tok and verify_api_key(tok):
+            await websocket.send_text(_json.dumps(
+                {"event": "auth", "data": {"ok": True}}))
+            return True
+        await websocket.close(code=4003, reason="Invalid auth frame")
+    except Exception as e:
+        logger.error(f"WebSocket首消息鉴权失败: {e}")
+        try:
+            await websocket.close(code=4001, reason="Missing authentication token")
+        except Exception:
+            pass
+    return False
+
+
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket, token: Optional[str] = Query(None)):
     """
     WebSocket聊天接口 - 支持流式输出
 
-    连接方式：
-    ws://localhost:8000/ws/chat?token=your_api_key
+    连接方式（推荐·首消息鉴权，token 不入 URL）：
+    ws://localhost:8000/ws/chat → 首条消息 {"type":"auth","token":"your_api_key"}
+    兼容（将移除）：ws://localhost:8000/ws/chat?token=your_api_key
 
     消息格式：
     {
@@ -99,18 +146,8 @@ async def websocket_chat(websocket: WebSocket, token: Optional[str] = Query(None
         "data": {"content": "..."}
     }
     """
-    # 验证认证
-    if not token:
-        await websocket.close(code=4001, reason="Missing authentication token")
-        return
-
-    try:
-        if not verify_api_key(token):
-            await websocket.close(code=4003, reason="Invalid API key")
-            return
-    except Exception as e:
-        logger.error(f"WebSocket认证失败: {e}")
-        await websocket.close(code=4003, reason="Authentication failed")
+    # 验证认证（双通道，见 _ws_authenticate）
+    if not await _ws_authenticate(websocket, token):
         return
 
     await manager.connect(websocket)
@@ -186,26 +223,17 @@ async def websocket_monitor(websocket: WebSocket, token: Optional[str] = Query(N
     """
     WebSocket监控接口 - 实时推送系统状态
 
-    连接方式：
-    ws://localhost:8000/ws/monitor?token=your_api_key
+    连接方式（推荐·首消息鉴权）：ws://localhost:8000/ws/monitor
+      → 首条消息 {"type":"auth","token":"your_api_key"}
+    兼容（将移除）：ws://localhost:8000/ws/monitor?token=your_api_key
 
     推送内容：
     - 模型状态
     - 请求统计
     - 系统资源
     """
-    # 验证认证
-    if not token:
-        await websocket.close(code=4001, reason="Missing authentication token")
-        return
-
-    try:
-        if not verify_api_key(token):
-            await websocket.close(code=4003, reason="Invalid API key")
-            return
-    except Exception as e:
-        logger.error(f"WebSocket认证失败: {e}")
-        await websocket.close(code=4003, reason="Authentication failed")
+    # 验证认证（双通道，见 _ws_authenticate；connect 已幂等处理 accept）
+    if not await _ws_authenticate(websocket, token):
         return
 
     await manager.connect(websocket)
