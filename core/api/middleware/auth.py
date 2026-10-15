@@ -53,11 +53,13 @@ class AuthConfig:
     # 基础免鉴权路径（探活面）；/metrics 与 /docs 族默认豁免保持历史行为，
     # 可经 AUTH_PROTECT_METRICS / AUTH_PROTECT_DOCS 环境变量收紧（首审 P2 治理
     # 2026-10-05：公网暴露前应置 true——指标与 API 面不应对外可见；默认 False 零变更）
+    # /v1/auth/login：M4 新增会话签发端点——登录请求天然无令牌可验，必须豁免（新增端点，无历史行为变更）
     _BASE_SKIP_PATHS: Set[str] = {
         "/v1/ping",
         "/v1/health",
         "/health",
         "/healthz",
+        "/v1/auth/login",
     }
     _METRICS_SKIP_PATHS: Set[str] = {"/metrics"}
     _DOCS_SKIP_PATHS: Set[str] = {"/docs", "/openapi.json", "/redoc"}

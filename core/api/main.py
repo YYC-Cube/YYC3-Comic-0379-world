@@ -30,6 +30,7 @@ import psutil
 from app.api import (
     a2a,
     agent,
+    auth,
     chat,
     documents,
     knowledge_base,
@@ -290,6 +291,7 @@ app.include_router(documents.router, tags=["📄 文档管理"])
 app.include_router(rag.router, tags=["🔍 RAG检索"])
 app.include_router(proxy.router, tags=["🧩 能力代理(embeddings/rerank/asr/ocr)"])
 app.include_router(video_tasks.router, tags=["🎬 视频任务(MiniMax-H3异步)"])
+app.include_router(auth.router, prefix="/v1", tags=["🔐 会话鉴权"])  # M4：B 端 login/verify 最小面
 
 # vk 管理看板（零依赖单页，受全局 Auth 中间件保护）
 from app.services.admin_ui import router as admin_ui_router  # noqa: E402
